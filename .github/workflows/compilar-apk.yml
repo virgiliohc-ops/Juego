@@ -42,11 +42,11 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -n 8
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
           mkdir -p instalador
-          cp "$APK" instalador/NUMEN_0_3_Android.apk
+          cp "$APK" instalador/NUMEN_0_4_Android.apk
       - name: Publicar instalador para descarga
         uses: actions/upload-artifact@v4
         with:
-          name: NUMEN-0-3-Android-APK
-          path: instalador/NUMEN_0_3_Android.apk
+          name: NUMEN-0-4-Android-APK
+          path: instalador/NUMEN_0_4_Android.apk
           if-no-files-found: error
           retention-days: 30
