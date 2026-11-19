@@ -63,7 +63,7 @@ public class MainActivity extends Activity {
     ipField.setSingleLine(true);ipField.setTextSize(14);
     ipField.setInputType(InputType.TYPE_CLASS_PHONE);
     ipField.setHint("IP de tu LG");
-    ipField.setText(pref.getString("ip",""));
+    ipField.setText(pref.getString("ip","192.168.0.11"));
     ipField.setPadding(dp(13),dp(8),dp(8),dp(8));
     ipField.setBackground(background(Color.WHITE,14));
     LinearLayout.LayoutParams fieldParams=new LinearLayout.LayoutParams(0,dp(50),1);
@@ -101,8 +101,11 @@ public class MainActivity extends Activity {
     stateRow.addView(forget);
     root.addView(stateRow);
 
-    RemoteView remote=new RemoteView(this);
-    root.addView(remote,new LinearLayout.LayoutParams(-1,-2));
+    // Control panel is built with standard Android buttons; always visible.
+    LinearLayout remote=createRemote();
+    LinearLayout.LayoutParams remoteParams=new LinearLayout.LayoutParams(-1,-2);
+    remoteParams.setMargins(0,dp(7),0,dp(10));
+    root.addView(remote,remoteParams);
 
     TextView foot=new TextView(this);
     foot.setText("La LG debe estar encendida y conectada a la misma red local que el móvil. Si no aparece en la búsqueda, puedes introducir su IP manualmente. Voz y Alexa no disponibles; encendido desde apagado aún no implementado.");
@@ -448,188 +451,126 @@ public class MainActivity extends Activity {
     super.onDestroy();
   }
 
-  private final class RemoteView extends View {
-    private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final ArrayList<Hit> hits=new ArrayList<>();
-    private final float W=320f,H=1194f;
-    private String pressed="";
-    private float startX,startY;
-    private class Hit{
-      final RectF box;final String key;
-      Hit(String key,float left,float top,float right,float bottom){
-        this.key=key;this.box=new RectF(left,top,right,bottom);
+
+  // Native Android widgets rather than a custom Canvas. Each button is an actual
+  // interactive View, so it remains visible with device-specific renderers.
+  private LinearLayout createRemote(){
+    LinearLayout panel=new LinearLayout(this);
+    panel.setOrientation(LinearLayout.VERTICAL);
+    panel.setPadding(dp(13),dp(15),dp(13),dp(22));
+    GradientDrawable shell=new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+      new int[]{Color.rgb(57,59,63),Color.rgb(17,19,21)});
+    shell.setCornerRadius(dp(43));
+    shell.setStroke(dp(2),Color.rgb(90,91,94));
+    panel.setBackground(shell);
+
+    TextView heading=new TextView(this);
+    heading.setText("LG  ·  MAGIC REMOTE");
+    heading.setTextColor(Color.rgb(178,182,183));
+    heading.setTextSize(11);
+    heading.setLetterSpacing(0.10f);
+    heading.setGravity(Gravity.CENTER);
+    heading.setPadding(0,dp(4),0,dp(15));
+    panel.addView(heading,new LinearLayout.LayoutParams(-1,dp(42)));
+
+    remoteRow(panel,new String[]{"⏻","LG","🎙"},new String[]{"POWER","","MIC"},
+      new int[]{0,0,0});
+    addRemoteSection(panel,"TECLADO NUMÉRICO");
+    remoteRow(panel,new String[]{"1","2","3"},new String[]{"1","2","3"},null);
+    remoteRow(panel,new String[]{"4","5","6"},new String[]{"4","5","6"},null);
+    remoteRow(panel,new String[]{"7","8","9"},new String[]{"7","8","9"},null);
+    remoteRow(panel,new String[]{"GUIDE","0","•••"},new String[]{"GUIDE","0","MORE"},null);
+
+    addRemoteSection(panel,"VOLUMEN Y CANALES");
+    remoteRow(panel,new String[]{"VOL +","✕","CH ▲"},new String[]{"VOLUP","MUTE","CHUP"},null);
+    remoteRow(panel,new String[]{"VOL −","ⓘ","CH ▼"},new String[]{"VOLDOWN","INFO","CHDOWN"},null);
+    remoteRow(panel,new String[]{"⌂ INICIO","OK","▣ INPUT"},new String[]{"HOME","ENTER","INPUT"},null);
+
+    addRemoteSection(panel,"RUEDA DE NAVEGACIÓN");
+    remoteRow(panel,new String[]{"","▲",""},new String[]{"","UP",""},null);
+    remoteRow(panel,new String[]{"◀","OK","▶"},new String[]{"LEFT","ENTER","RIGHT"},
+      new int[]{0,Color.rgb(67,104,96),0});
+    remoteRow(panel,new String[]{"","▼",""},new String[]{"","DOWN",""},null);
+    remoteRow(panel,new String[]{"↶ ATRÁS","⚙ AJUSTES"},new String[]{"BACK","SETTINGS"},null);
+
+    addRemoteSection(panel,"BOTONES DE COLOR");
+    remoteRow(panel,new String[]{"●","●","●","●"},new String[]{"RED","GREEN","YELLOW","BLUE"},
+      new int[]{Color.rgb(204,64,83),Color.rgb(48,150,108),
+        Color.rgb(207,159,43),Color.rgb(58,116,183)});
+
+    addRemoteSection(panel,"ACCESOS DIRECTOS");
+    remoteRow(panel,new String[]{"NETFLIX","prime video"},new String[]{"NETFLIX","PRIME"},
+      new int[]{Color.rgb(72,42,47),Color.rgb(42,65,78)});
+    remoteRow(panel,new String[]{"Disney+","Rakuten TV"},new String[]{"DISNEY","RAKUTEN"},null);
+    remoteRow(panel,new String[]{"LG Channels","alexa"},new String[]{"LGCHANNELS","ALEXA"},null);
+
+    TextView footer=new TextView(this);
+    footer.setText("Mando experimental · LG webOS");
+    footer.setTextColor(Color.rgb(155,158,163));
+    footer.setTextSize(11);
+    footer.setGravity(Gravity.CENTER);
+    footer.setPadding(0,dp(21),0,0);
+    panel.addView(footer,new LinearLayout.LayoutParams(-1,dp(47)));
+    return panel;
+  }
+
+  private void addRemoteSection(LinearLayout parent,String label){
+    TextView text=new TextView(this);
+    text.setText(label);
+    text.setTextSize(10);
+    text.setLetterSpacing(0.06f);
+    text.setTextColor(Color.rgb(160,165,167));
+    text.setGravity(Gravity.CENTER);
+    text.setPadding(0,dp(11),0,0);
+    parent.addView(text,new LinearLayout.LayoutParams(-1,dp(35)));
+  }
+
+  private void remoteRow(LinearLayout parent,String[] labels,String[] actions,int[] fills){
+    LinearLayout row=new LinearLayout(this);
+    row.setOrientation(LinearLayout.HORIZONTAL);
+    row.setGravity(Gravity.CENTER);
+    LinearLayout.LayoutParams rowParams=new LinearLayout.LayoutParams(-1,dp(62));
+    parent.addView(row,rowParams);
+    for(int i=0;i<labels.length;i++){
+      String text=labels[i],cmd=actions[i];
+      LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(53),1f);
+      p.setMargins(dp(3),dp(3),dp(3),dp(3));
+      if(cmd.isEmpty()){
+        TextView decorative=new TextView(this);
+        decorative.setText(text);
+        decorative.setTextColor(Color.rgb(174,180,182));
+        decorative.setTextSize(19);
+        decorative.setTypeface(null,1);
+        decorative.setGravity(Gravity.CENTER);
+        row.addView(decorative,p);
+        continue;
       }
-    }
-    RemoteView(Context c){
-      super(c);setLayerType(View.LAYER_TYPE_SOFTWARE,null);
-      setContentDescription("Mando LG con teclas y rueda central");
-      installHits();
-    }
-    @Override protected void onMeasure(int w,int h){
-      int width=MeasureSpec.getSize(w);
-      setMeasuredDimension(width,(int)(width*(H/W)));
-    }
-    private void hit(String k,float x,float y,float r){hits.add(new Hit(k,x-r,y-r,x+r,y+r));}
-    private void box(String k,float l,float t,float r,float b){hits.add(new Hit(k,l,t,r,b));}
-    private void installHits(){
-      hit("POWER",90,73,27);hit("MIC",234,73,26);
-      for(int n=1;n<=9;n++){int col=(n-1)%3,row=(n-1)/3;hit(""+n,86+74*col,147+63*row,27);}
-      hit("GUIDE",86,336,27);hit("0",160,336,27);hit("MORE",234,336,27);
-      box("VOLUP",66,382,117,458);box("VOLDOWN",66,458,117,538);
-      box("CHUP",203,382,254,458);box("CHDOWN",203,458,254,538);
-      hit("MUTE",160,448,30);hit("INFO",160,565,26);
-      hit("HOME",86,601,26);hit("INPUT",234,601,26);
-      hit("BACK",88,899,26);hit("SETTINGS",232,899,26);
-      box("RED",66,947,112,974);box("GREEN",113,947,158,974);box("YELLOW",162,947,207,974);box("BLUE",208,947,254,974);
-      box("NETFLIX",62,992,160,1032);box("PRIME",160,992,258,1032);
-      box("DISNEY",62,1034,160,1074);box("RAKUTEN",160,1034,258,1074);
-      box("LGCHANNELS",62,1076,160,1116);box("ALEXA",160,1076,258,1116);
-    }
-    private void basePaint(int color){paint.reset();paint.setAntiAlias(true);paint.setColor(color);}
-    private int rgb(String c){return Color.parseColor(c);}
-    private void gradient(Canvas c,RectF r,float radius,int top,int bottom){
-      basePaint(Color.WHITE);
-      paint.setShader(new LinearGradient(r.left,r.top,r.right,r.bottom,top,bottom,Shader.TileMode.CLAMP));
-      c.drawRoundRect(r,radius,radius,paint);paint.setShader(null);
-    }
-    private void outline(Canvas c,RectF r,float radius,int color,float stroke){
-      basePaint(color);paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(stroke);
-      c.drawRoundRect(r,radius,radius,paint);paint.setStyle(Paint.Style.FILL);
-    }
-    private void centered(Canvas c,String t,float x,float y,float size,int color,boolean bold){
-      basePaint(color);
-      paint.setTextSize(size);paint.setTextAlign(Paint.Align.CENTER);
-      paint.setTypeface(bold?Typeface.create("sans-serif-medium",Typeface.BOLD):Typeface.create("sans-serif",Typeface.NORMAL));
-      Paint.FontMetrics fm=paint.getFontMetrics();
-      c.drawText(t,x,y-(fm.ascent+fm.descent)/2,paint);
-    }
-    private void disc(Canvas c,float x,float y,float rad,String label,float size,int color,String command){
-      RectF r=new RectF(x-rad,y-rad,x+rad,y+rad);
-      basePaint(rgb("#08090b"));paint.setShadowLayer(5,0,3,rgb("#aa000000"));c.drawOval(r,paint);paint.clearShadowLayer();
-      gradient(c,new RectF(x-rad+2,y-rad+2,x+rad-2,y+rad-2),rad,rgb("#4d4e51"),rgb("#26282a"));
-      outline(c,new RectF(x-rad+2,y-rad+2,x+rad-2,y+rad-2),rad,rgb("#606164"),0.85f);
-      if(command.equals(pressed)){
-        basePaint(0x4483b69f);c.drawCircle(x,y,rad-2,paint);
-      }
-      centered(c,label,x,y,size,color,false);
-    }
-    private void oval(Canvas c,float l,float t,float r,float b,int colorTop,int colorBottom){
-      RectF rc=new RectF(l,t,r,b);
-      gradient(c,rc,(r-l)/2,colorTop,colorBottom);
-      outline(c,rc,(r-l)/2,rgb("#55565a"),0.7f);
-    }
-    private void logo(Canvas c,String word,float l,float t,float r,float b,int color,int size,boolean bold){
-      RectF bounds=new RectF(l,t,r,b);
-      gradient(c,bounds,4,rgb("#343436"),rgb("#17181a"));
-      outline(c,bounds,4,rgb("#55565a"),.6f);
-      centered(c,word,(l+r)/2,(t+b)/2,size,color,bold);
-    }
-    private void rocker(Canvas c,float x,String top,String bottom,String upper,String lower){
-      oval(c,x-23,380,x+23,537,rgb("#404247"),rgb("#242629"));
-      basePaint(rgb("#141517"));paint.setStrokeWidth(2);
-      c.drawLine(x-23,459,x+23,459,paint);
-      centered(c,top,x,415,30,rgb("#bfc2c5"),false);
-      centered(c,bottom,x,503,30,rgb("#bfc2c5"),false);
-      if(pressed.equals(upper)||pressed.equals(lower)){
-        basePaint(0x338bd8b1);
-        RectF o=new RectF(x-21,pressed.equals(upper)?382:460,x+21,pressed.equals(upper)?458:534);
-        c.drawRoundRect(o,16,16,paint);
-      }
-    }
-    @Override protected void onDraw(Canvas c){
-      super.onDraw(c);
-      c.save();c.scale(getWidth()/W,getWidth()/W);
-      RectF shadow=new RectF(29,17,291,1175);
-      basePaint(0x55000000);paint.setShadowLayer(14,0,8,0x44000000);c.drawRoundRect(shadow,72,72,paint);paint.clearShadowLayer();
-      RectF body=new RectF(26,9,294,1174);
-      gradient(c,body,69,rgb("#36383b"),rgb("#101114"));
-      outline(c,body,69,rgb("#777b7e"),2f);
-      basePaint(0x1bffffff);c.drawRoundRect(new RectF(33,24,43,1165),9,9,paint);
-      disc(c,90,73,25,"⏻",32,rgb("#f4556d"),"POWER");
-      // The physical LG remote has a microphone key; it is visual-only here.
-      disc(c,234,73,21,"♩",24,rgb("#c2c4c7"),"MIC");
-      for(int n=1;n<=9;n++){
-        int col=(n-1)%3,row=(n-1)/3;
-        disc(c,86+col*74,147+row*63,26,""+n,25,rgb("#e0e2e4"),""+n);
-      }
-      disc(c,86,336,26,"≡",28,rgb("#e2e3e5"),"GUIDE");
-      centered(c,"GUIDE",86,368,9,rgb("#8e9196"),true);
-      disc(c,160,336,26,"0",25,rgb("#e0e2e4"),"0");
-      disc(c,234,336,26,"•••",20,rgb("#e0e2e4"),"MORE");
-      rocker(c,91,"+","−","VOLUP","VOLDOWN");
-      rocker(c,229,"⌃","⌄","CHUP","CHDOWN");
-      centered(c,"VOL",91,373,9,rgb("#aeb0b4"),true);
-      centered(c,"CH",229,373,9,rgb("#aeb0b4"),true);
-      disc(c,160,448,27,"×",31,rgb("#d7dadd"),"MUTE");
-      centered(c,"MUTE",160,487,9,rgb("#9b9ea0"),true);
-      disc(c,160,565,24,"i",23,rgb("#d4d6d8"),"INFO");
-      disc(c,86,601,25,"⌂",29,rgb("#e0e2e4"),"HOME");
-      disc(c,234,601,25,"▣",25,rgb("#e0e2e4"),"INPUT");
-      // Magic wheel: the four surrounding sectors are tappable arrow keys.
-      RectF ring=new RectF(53,660,267,875);
-      basePaint(rgb("#0b0d0f"));paint.setShadowLayer(7,0,4,0x99000000);c.drawOval(ring,paint);paint.clearShadowLayer();
-      basePaint(rgb("#424448"));
-      paint.setShader(new RadialGradient(148,750,112,new int[]{rgb("#3b3f41"),rgb("#191b1f"),rgb("#090a0d")},null,Shader.TileMode.CLAMP));
-      c.drawCircle(160,768,101,paint);paint.setShader(null);
-      basePaint(rgb("#575b5d"));paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(1.1f);c.drawCircle(160,768,103,paint);paint.setStyle(Paint.Style.FILL);
-      centered(c,"⌃",160,693,22,rgb("#7e8487"),true);
-      centered(c,"⌄",160,848,22,rgb("#7e8487"),true);
-      centered(c,"‹",79,768,24,rgb("#737b7c"),true);
-      centered(c,"›",241,768,24,rgb("#737b7c"),true);
-      RectF wheel=new RectF(132,740,188,796);
-      gradient(c,wheel,28,rgb("#585a5d"),rgb("#25272a"));
-      outline(c,wheel,28,rgb("#686c70"),1.2f);
-      for(int i=0;i<8;i++){basePaint(rgb("#202225"));paint.setStrokeWidth(1f);c.drawLine(143,752+i*4,177,752+i*4,paint);}
-      if(pressed.equals("ENTER")){basePaint(0x5568c7a7);c.drawCircle(160,768,29,paint);}
-      centered(c,"OK",160,805,10,rgb("#b7bec0"),true);
-      disc(c,88,899,24,"↶",29,rgb("#cbd0d2"),"BACK");
-      disc(c,232,899,24,"⚙",28,rgb("#cbd0d2"),"SETTINGS");
-      int[] colors={rgb("#d84b66"),rgb("#42ba90"),rgb("#f5c75b"),rgb("#4b9bce")};
-      String[] colorNames={"RED","GREEN","YELLOW","BLUE"};
-      for(int i=0;i<4;i++){
-        float l=66+i*47;RectF pill=new RectF(l,947,l+44,974);
-        gradient(c,pill,14,colors[i],colors[i]);
-        if(pressed.equals(colorNames[i]))outline(c,pill,14,Color.WHITE,3);
-        centered(c,"•••",l+22,960,11,0xe7ffffff,false);
-      }
-      logo(c,"NETFLIX",62,992,160,1032,rgb("#ef374b"),14,true);
-      logo(c,"prime video",160,992,258,1032,rgb("#e8eff2"),13,true);
-      logo(c,"Disney+",62,1034,160,1074,rgb("#ecf0f6"),15,true);
-      logo(c,"Rakuten TV",160,1034,258,1074,rgb("#edf0f2"),13,true);
-      logo(c,"LG Channels",62,1076,160,1116,rgb("#d6d8da"),12,true);
-      logo(c,"alexa",160,1076,258,1116,rgb("#e2e7e8"),16,false);
-      centered(c,"LG",160,1149,17,rgb("#767b7f"),true);
-      c.restore();
-    }
-    private String find(float x,float y){
-      float dx=x-160,dy=y-768;
-      float d=(float)Math.sqrt(dx*dx+dy*dy);
-      if(d<104){
-        if(d<36)return "ENTER";
-        if(Math.abs(dy)>=Math.abs(dx))return dy<0?"UP":"DOWN";
-        return dx<0?"LEFT":"RIGHT";
-      }
-      for(Hit hit:hits)if(hit.box.contains(x,y))return hit.key;
-      return "";
-    }
-    @Override public boolean onTouchEvent(android.view.MotionEvent e){
-      float x=e.getX()*W/getWidth(),y=e.getY()*W/getWidth();
-      switch(e.getActionMasked()){
-        case MotionEvent.ACTION_DOWN:
-          startX=x;startY=y;pressed=find(x,y);
-          if(pressed.isEmpty())return false;
-          getParent().requestDisallowInterceptTouchEvent(true);
-          invalidate();return true;
-        case MotionEvent.ACTION_UP:
-          String selected=find(x,y),active=pressed;pressed="";invalidate();
-          if(!active.isEmpty()&&active.equals(selected)){
-            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-            action(active);
-          }
-          return true;
-        case MotionEvent.ACTION_CANCEL:pressed="";invalidate();return true;
-      }
-      return true;
+      Button button=new Button(this);
+      button.setAllCaps(false);
+      button.setText(text);
+      button.setTextSize(text.length()>9?11:(text.length()>5?12:18));
+      button.setTypeface(null,1);
+      button.setTextColor(cmd.equals("POWER")?Color.rgb(255,91,107):Color.rgb(244,247,247));
+      button.setPadding(0,0,0,0);
+      button.setMinWidth(0);
+      button.setMinHeight(0);
+      int backgroundColor=(fills!=null && i<fills.length && fills[i]!=0)
+         ? fills[i] : Color.rgb(64,67,71);
+      GradientDrawable background=new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+        new int[]{backgroundColor,dimColor(backgroundColor)});
+      background.setCornerRadius(dp(23));
+      background.setStroke(dp(1),Color.rgb(92,96,99));
+      button.setBackground(background);
+      button.setContentDescription(cmd.equals("MIC")?"Micrófono no disponible":text);
+      button.setOnClickListener(v->{
+        v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        action(cmd);
+      });
+      row.addView(button,p);
     }
   }
+  private int dimColor(int c){
+    return Color.rgb((int)(Color.red(c)*.65f),(int)(Color.green(c)*.65f),(int)(Color.blue(c)*.65f));
+  }
+
 }
