@@ -40,7 +40,7 @@ public class MainActivity extends Activity {
     ipBox.setSingleLine(true);ipBox.setText(prefs.getString("ip",""));ipBox.setHint("IP de la TV, p. ej. 192.168.1.50");
     ipBox.setTextSize(16);ipBox.setPadding(dp(15),dp(8),dp(15),dp(8));
     root.addView(ipBox,new LinearLayout.LayoutParams(-1,dp(55)));
-    row(root,{"Conectar"},new Runnable[]{()->connect()});
+    row(root,new String[]{"Conectar"},new Runnable[]{()->connect()});
     status=addText(root,"Móvil y TV deben estar en la misma red.");
     addTitle(root,"Encendido y navegación",17);
     row(root,new String[]{"⏻ Apagar","Inicio","Atrás"}, new Runnable[]{()->req("ssap://system/turnOff",null),()->key("HOME"),()->key("BACK")});
