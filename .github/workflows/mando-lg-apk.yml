@@ -1,8 +1,8 @@
-name: Compilar mando LG fotográfico v0.2
+name: Compilar mando LG automático v0.3
 on:
   push:
     branches:
-      - build/mando-lg-foto-v2-20261119
+      - build/mando-lg-auto-v03-20261119
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,6 +33,6 @@ jobs:
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: MiMandoLG-foto-v02-APK
+          name: MiMandoLG-auto-v03-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
