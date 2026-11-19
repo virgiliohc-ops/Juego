@@ -492,66 +492,154 @@ public class MainActivity extends Activity {
   }
 
 
-  private String normalizeMAC(String raw){
-    if(raw==null)return "";
-    String cleaned=raw.trim().replaceAll("[^0-9A-Fa-f]","").toUpperCase(java.util.Locale.US);
-    if(cleaned.length()!=12 || cleaned.equals("000000000000") || cleaned.equals("FFFFFFFFFFFF"))return "";
+
+  private static final class WifiRoute {
+    final Network network;
+    final Inet4Address address;
+    final int prefix;
+    final String broadcast;
+    WifiRoute(Network net,Inet4Address ipv4,int length){
+      network=net;address=ipv4;prefix=length;
+      broadcast=LanTools.directedBroadcast(ipv4,length);
+    }
+  }
+
+  private WifiRoute wifiRoute(){
     try{
-      int first=Integer.parseInt(cleaned.substring(0,2),16);
-      if((first&1)!=0)return "";
-    }catch(Exception e){return "";}
-    return cleaned.substring(0,2)+":"+cleaned.substring(2,4)+":"+
-      cleaned.substring(4,6)+":"+cleaned.substring(6,8)+":"+
-      cleaned.substring(8,10)+":"+cleaned.substring(10,12);
+      ConnectivityManager manager=(ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
+      if(manager==null)return null;
+      for(Network network:manager.getAllNetworks()){
+        NetworkCapabilities cap=manager.getNetworkCapabilities(network);
+        if(cap==null||!cap.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))continue;
+        LinkProperties props=manager.getLinkProperties(network);
+        if(props==null)continue;
+        for(LinkAddress link:props.getLinkAddresses()){
+          if(link.getAddress() instanceof Inet4Address){
+            Inet4Address addr=(Inet4Address)link.getAddress();
+            if(localAddress(addr.getHostAddress()))
+              return new WifiRoute(network,addr,link.getPrefixLength());
+          }
+        }
+      }
+    }catch(Exception ex){diagnostic("Fallo consultando la red Wi-Fi: "+ex.getClass().getSimpleName());}
+    return null;
   }
-  private String readMAC(JSONObject obj){
-    if(obj==null)return "";
-    return normalizeMAC(obj.optString("macAddress",""));
+
+  private String normalizeMAC(String raw){return LanTools.normalizeMAC(raw);}
+  private String firstValidMAC(String... options){
+    for(String option:options){
+      String mac=normalizeMAC(option);
+      if(!mac.isEmpty())return mac;
+    }
+    return "";
   }
+  private String readMAC(JSONObject value){
+    if(value==null)return "";
+    return firstValidMAC(value.optString("macAddress",""),value.optString("wifiMacAddress",""));
+  }
+  private boolean isControlReachable(Network network,String host){
+    for(int port:new int[]{3001,3000}){
+      try(Socket test=network.getSocketFactory().createSocket()){
+        test.connect(new InetSocketAddress(host,port),500);
+        return true;
+      }catch(Exception ignored){}
+    }
+    return false;
+  }
+
   private void sendWake(){
-    String host=ipField.getText().toString().trim();
-    if(!localAddress(host)){state("Primero selecciona o detecta tu televisor.");return;}
-    String typed=normalizeMAC(macField==null?"":macField.getText().toString());
-    LinkedHashSet<String> macs=new LinkedHashSet<>();
+    final String host=ipField.getText().toString().trim();
+    if(!localAddress(host)){state("Primero indica la IP de la LG.");return;}
+    final WifiRoute wifi=wifiRoute();
+    if(wifi==null){
+      state("No hay Wi-Fi activo para encender la televisión.");
+      diagnostic("El móvil debe estar en el Wi-Fi doméstico; no basta con datos móviles.");
+      return;
+    }
+    String raw=macField==null?"":macField.getText().toString();
+    final String typed=normalizeMAC(raw);
+    if(!raw.trim().isEmpty()&&typed.isEmpty()){
+      state("La dirección MAC introducida no es válida.");
+      diagnostic("Usa seis parejas hexadecimales, p. ej. 14:7F:67:CE:D9:44.");
+      return;
+    }
+    final LinkedHashSet<String> macs=new LinkedHashSet<>();
     if(!typed.isEmpty())macs.add(typed);
-    String wifi=normalizeMAC(pref.getString("wifi_mac:"+host,""));
-    String wired=normalizeMAC(pref.getString("wired_mac:"+host,""));
-    if(!wifi.isEmpty())macs.add(wifi);
-    if(!wired.isEmpty())macs.add(wired);
+    String wifiMac=normalizeMAC(pref.getString("wifi_mac:"+host,""));
+    String wiredMac=normalizeMAC(pref.getString("wired_mac:"+host,""));
+    if(!wifiMac.isEmpty())macs.add(wifiMac);
+    if(!wiredMac.isEmpty())macs.add(wiredMac);
     String saved=normalizeMAC(pref.getString("mac:"+host,""));
     if(!saved.isEmpty())macs.add(saved);
     if(macs.isEmpty()){
-      state("No tengo la MAC de la LG. Conéctala encendida una vez o escribe su MAC.");
-      toast("Activa 'Encender mediante Wi-Fi' en los ajustes de la TV.");
+      state("Falta una MAC válida de la LG.");
+      diagnostic("Conecta con la LG encendida para obtener la MAC, o introdúcela.");
       return;
     }
     if(!typed.isEmpty())pref.edit().putString("mac:"+host,typed).apply();
-    state("Enviando señal de encendido por Wi-Fi…");
+
+    boolean inSubnet=false;
+    try{
+      inSubnet=LanTools.sameSubnet((Inet4Address)InetAddress.getByName(host),wifi.address,wifi.prefix);
+    }catch(Exception ignored){}
+    final boolean localNet=inSubnet;
+    state("Enviando encendido por la interfaz Wi-Fi del móvil…");
+    diagnostic("Móvil "+wifi.address.getHostAddress()+"/"+wifi.prefix+" · difusión "+
+      wifi.broadcast+" · MAC: "+macs.size()+
+      (localNet?"":" · TV fuera de la misma subred"));
+
     new Thread(()->{
+      int count=0,failed=0;
+      String lastError="";
+      DatagramSocket socket=null;
       try{
-        LinkedHashSet<String> dest=new LinkedHashSet<>();
-        dest.add("255.255.255.255");
-        String[] octets=host.split("\\.");
-        if(octets.length==4)dest.add(octets[0]+"."+octets[1]+"."+octets[2]+".255");
-        DatagramSocket socket=new DatagramSocket();
-        try{
-          socket.setBroadcast(true);
-          for(String mac:macs){
-            byte[] hex=new byte[6];String compact=mac.replace(":","");
-            for(int i=0;i<6;i++)hex[i]=(byte)Integer.parseInt(compact.substring(i*2,i*2+2),16);
-            byte[] packet=new byte[6+16*6];java.util.Arrays.fill(packet,0,6,(byte)255);
-            for(int i=6;i<packet.length;i++)packet[i]=hex[(i-6)%6];
-            for(String address:dest) {
-              InetAddress target=InetAddress.getByName(address);
-              for(int port:new int[]{9,7}){
-                DatagramPacket p=new DatagramPacket(packet,packet.length,target,port);
-                for(int repeat=0;repeat<3;repeat++)socket.send(p);
+        socket=new DatagramSocket();
+        wifi.network.bindSocket(socket);  // Android Network API: select Wi-Fi explicitly
+        socket.setBroadcast(true);
+        LinkedHashSet<String> destinations=new LinkedHashSet<>();
+        if(wifi.prefix<=30)destinations.add(wifi.broadcast);
+        destinations.add("255.255.255.255");
+        for(String mac:macs){
+          byte[] magic=LanTools.magicPacket(mac);
+          for(String address:destinations){
+            InetAddress target=InetAddress.getByName(address);
+            for(int port:new int[]{9,7}){
+              for(int attempt=0;attempt<3;attempt++){
+                try{
+                  socket.send(new DatagramPacket(magic,magic.length,target,port));
+                  count++;
+                }catch(Exception e){failed++;lastError=e.getClass().getSimpleName();}
               }
             }
           }
-        }finally{socket.close();}
-        state("Señal enviada. Si la LG no arranca, revisa 'Encender mediante Wi-Fi'.");
-      }catch(Exception ex){state("Error al enviar encendido: "+ex.getClass().getSimpleName());}
+        }
+      }catch(Exception ex){failed++;lastError=ex.getClass().getSimpleName();}
+      finally{if(socket!=null)socket.close();}
+      final int sent=count,errors=failed;
+      if(count==0){
+        state("Error: no se enviaron paquetes Wake-on-LAN.");
+        diagnostic("Interfaz Wi-Fi "+wifi.address.getHostAddress()+" · error "+lastError);
+        return;
+      }
+      state("Señal enviada. Comprobando si la TV vuelve a responder…");
+      diagnostic(sent+" datagramas UDP enviados; "+errors+" errores. "+
+        "No existe confirmación de recepción. MAC: "+String.join(", ",macs)+
+        ". Broadcast: "+wifi.broadcast);
+      for(int i=0;i<15;i++){
+        try{Thread.sleep(2000);}catch(InterruptedException e){Thread.currentThread().interrupt();return;}
+        if(isControlReachable(wifi.network,host)){
+          state("La TV vuelve a responder en red. Pulsa Conectar.");
+          diagnostic("La IP "+host+" responde en un puerto webOS tras el envío. "+
+            "Verifica que la pantalla realmente se haya encendido.");
+          return;
+        }
+      }
+      state("No se detecta la televisión después de 30 segundos.");
+      diagnostic("Enviados: "+sent+" · fallos: "+errors+" · Wi-Fi "+
+        wifi.address.getHostAddress()+"/"+wifi.prefix+
+        " · difusión "+wifi.broadcast+
+        " · MAC: "+String.join(", ",macs)+
+        ". El envío no garantiza que la TV lo reciba.");
     },"lg-wake-on-lan").start();
   }
 
