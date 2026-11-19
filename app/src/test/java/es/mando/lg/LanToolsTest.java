@@ -9,18 +9,18 @@ public class LanToolsTest {
   private Inet4Address ip(String s)throws Exception{return (Inet4Address)InetAddress.getByName(s);}
 
   @Test public void testMACNormalization() {
-    assertEquals("14:7F:67:CE:D9:44",LanTools.normalizeMAC("14-7f-67-ce-d9-44"));
-    assertEquals("14:7F:67:CE:D9:44",LanTools.normalizeMAC("147f67ced944"));
+    assertEquals("02:11:22:33:44:55",LanTools.normalizeMAC("02-11-22-33-44-55"));
+    assertEquals("02:11:22:33:44:55",LanTools.normalizeMAC("021122334455"));
     assertEquals("",LanTools.normalizeMAC("invalid"));
     assertEquals("",LanTools.normalizeMAC("FF:FF:FF:FF:FF:FF"));
     assertEquals("",LanTools.normalizeMAC("01:00:5E:00:00:01"));
   }
 
   @Test public void testMagicPacket() {
-    byte[] p=LanTools.magicPacket("14:7F:67:CE:D9:44");
+    byte[] p=LanTools.magicPacket("02:11:22:33:44:55");
     assertEquals(102,p.length);
     for(int i=0;i<6;i++)assertEquals(255,p[i]&255);
-    int[] mac={0x14,0x7f,0x67,0xce,0xd9,0x44};
+    int[] mac={0x02,0x11,0x22,0x33,0x44,0x55};
     for(int i=6;i<p.length;i++)assertEquals(mac[(i-6)%6],p[i]&255);
   }
 
