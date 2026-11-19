@@ -19,6 +19,7 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.*;
 import android.net.*;
+import android.net.wifi.WifiManager;
 import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends Activity {
@@ -26,6 +27,8 @@ public class MainActivity extends Activity {
   private final HashMap<String,String> appIds=new HashMap<>();
   private SharedPreferences pref;
   private TextView status;
+  private TextView macSummary;
+  private TextView diagnostics;
   private EditText ipField;
   private EditText macField;
   private WebSocket control,pointer;
@@ -84,7 +87,7 @@ public class MainActivity extends Activity {
     macField.setSingleLine(true);
     macField.setHint("MAC de la LG (detectada al conectar)");
     macField.setTextSize(12);
-    macField.setText(pref.getString("mac:"+ipField.getText().toString().trim(),""));
+    macField.setText(pref.getString("mac:"+ipField.getText().toString().trim(),"14:7F:67:CE:D9:44"));
     macField.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
     macField.setPadding(dp(10),dp(6),dp(8),dp(6));
     macField.setBackground(background(Color.WHITE,12));
@@ -100,6 +103,11 @@ public class MainActivity extends Activity {
     wakeBar.addView(wake,wp);
     wake.setOnClickListener(v->sendWake());
     root.addView(wakeBar);
+    macSummary=new TextView(this);
+    macSummary.setText("MAC de la v0.6 (tipo sin confirmar). Conecta para verificarla.");
+    macSummary.setTextColor(Color.rgb(91,101,100));macSummary.setTextSize(11);
+    macSummary.setPadding(dp(6),dp(4),dp(6),dp(4));
+    root.addView(macSummary);
     Button autoFind=new Button(this);
     autoFind.setText("⌕  Buscar mi LG automáticamente");
     autoFind.setAllCaps(false);
@@ -123,6 +131,14 @@ public class MainActivity extends Activity {
     forget.setOnClickListener(v->forgetPairing());
     stateRow.addView(forget);
     root.addView(stateRow);
+    diagnostics=new TextView(this);
+    diagnostics.setText("Diagnóstico: sin intentos de encendido.");
+    diagnostics.setTextColor(Color.rgb(36,76,68));diagnostics.setTextSize(11);
+    diagnostics.setPadding(dp(12),dp(9),dp(12),dp(10));
+    diagnostics.setBackground(background(Color.rgb(231,239,235),12));
+    LinearLayout.LayoutParams diagParams=new LinearLayout.LayoutParams(-1,-2);
+    diagParams.setMargins(0,dp(6),0,dp(6));
+    root.addView(diagnostics,diagParams);
 
     // Control panel is built with standard Android buttons; always visible.
     LinearLayout remote=createRemote();
@@ -143,6 +159,8 @@ public class MainActivity extends Activity {
   private int dp(int d){return (int)(d*getResources().getDisplayMetrics().density+0.5f);}
   private void state(String s){runOnUiThread(()->{if(status!=null)status.setText(s);});}
   private void toast(String s){runOnUiThread(()->Toast.makeText(this,s,Toast.LENGTH_SHORT).show());}
+  private void diagnostic(String s){runOnUiThread(()->{if(diagnostics!=null)diagnostics.setText("Diagnóstico: "+s);});}
+  private void macInfo(String s){runOnUiThread(()->{if(macSummary!=null)macSummary.setText(s);});}
   private static boolean localAddress(String s){
     try{
       String[] parts=s.split("\\.");
@@ -161,7 +179,10 @@ public class MainActivity extends Activity {
     if(pointer!=null)pointer.cancel();
     connected=false;pointerReady=false;gotApps=false;appIds.clear();queuedApp=null;
     ip=entered;fingerprint="";
-    if(macField!=null)macField.setText(pref.getString("mac:"+ip,""));
+    if(macField!=null)macField.setText(pref.getString("mac:"+ip,"14:7F:67:CE:D9:44"));
+    WifiRoute wifi=wifiRoute();
+    if(wifi==null){state("El teléfono no tiene una red Wi-Fi IPv4 activa.");
+      diagnostic("Conecta el móvil al Wi-Fi doméstico.");return;}
     pref.edit().putString("ip",ip).apply();
     try{
       final X509TrustManager trust=new X509TrustManager(){
@@ -184,10 +205,12 @@ public class MainActivity extends Activity {
       SSLContext ssl=SSLContext.getInstance("TLS");
       ssl.init(null,new TrustManager[]{trust},new SecureRandom());
       secure=new OkHttpClient.Builder()
+        .socketFactory(wifi.network.getSocketFactory())
         .sslSocketFactory(ssl.getSocketFactory(),trust)
         .hostnameVerifier((host,session)->host.equals(ip))
         .connectTimeout(7,TimeUnit.SECONDS).readTimeout(0,TimeUnit.MILLISECONDS).build();
       legacy=new OkHttpClient.Builder()
+        .socketFactory(wifi.network.getSocketFactory())
         .connectTimeout(7,TimeUnit.SECONDS).readTimeout(0,TimeUnit.MILLISECONDS).build();
       openSocket(generation,false);
     }catch(Exception e){state("Error de conexión: "+e.getMessage());}
@@ -219,7 +242,10 @@ public class MainActivity extends Activity {
         if(generation!=connectGeneration)return;
         connected=false;pointerReady=false;
         if(!old&&pref.getString("pin:"+ip,"").isEmpty()){openSocket(generation,true);}
-        else state("Sin conexión. Revisa la IP y los permisos de la LG.");
+        else {
+          state("TV sin conexión. Si está apagada, pulsa Encender.");
+          diagnostic("WebSocket: "+error.getClass().getSimpleName()+". Puede deberse al apagado.");
+        }
       }
       @Override public void onClosed(WebSocket w,int code,String reason){
         if(generation==connectGeneration){connected=false;pointerReady=false;state("Televisor desconectado.");}
@@ -249,19 +275,29 @@ public class MainActivity extends Activity {
         req("ssap://com.webos.service.networkinput/getPointerInputSocket",null);
         req("ssap://com.webos.applicationManager/listLaunchPoints",null);
         req("ssap://com.webos.service.connectionmanager/getinfo",null);
-      }else if(p!=null&&(p.has("wifiInfo")||p.has("wiredInfo"))){
-        String wifiMac=readMAC(p.optJSONObject("wifiInfo"));
-        String wiredMac=readMAC(p.optJSONObject("wiredInfo"));
+        macInfo("LG conectada. Leyendo direcciones MAC Wi-Fi y Ethernet…");
+      }else if(p!=null&&(p.has("wifiInfo")||p.has("wiredInfo")||p.has("wifi")||
+                              p.has("wired")||p.has("wifiMacAddress")||p.has("macAddress"))){
+        String wifiMac=firstValidMAC(
+          readMAC(p.optJSONObject("wifiInfo")),readMAC(p.optJSONObject("wifi")),
+          p.optString("wifiMacAddress",""));
+        String wiredMac=firstValidMAC(
+          readMAC(p.optJSONObject("wiredInfo")),readMAC(p.optJSONObject("wired")),
+          p.optString("wiredMacAddress",""),p.optString("macAddress",""));
         if(!wifiMac.isEmpty()||!wiredMac.isEmpty()){
           SharedPreferences.Editor ed=pref.edit();
           if(!wifiMac.isEmpty())ed.putString("wifi_mac:"+ip,wifiMac);
           if(!wiredMac.isEmpty())ed.putString("wired_mac:"+ip,wiredMac);
           String candidate=!wifiMac.isEmpty()?wifiMac:wiredMac;
           ed.putString("mac:"+ip,candidate).apply();
+          final String label="MAC Wi-Fi: "+(wifiMac.isEmpty()?"no disponible":wifiMac)+
+            " · Ethernet: "+(wiredMac.isEmpty()?"no disponible":wiredMac);
           runOnUiThread(()->{
             if(macField!=null)macField.setText(candidate);
-            state("LG conectada · Dirección para encendido guardada.");
+            macInfo(label);
           });
+        }else if(rid.startsWith("mac_info_")){
+          req("ssap://com.webos.service.connectionmanager/getStatus",null);
         }
       }else if(p!=null&&p.has("socketPath")){
         String socket=p.optString("socketPath","");
@@ -289,10 +325,14 @@ public class MainActivity extends Activity {
           gotApps=true;
           if(queuedApp!=null){String queued=queuedApp;queuedApp=null;launch(queued);}
         }
+      }else if("response".equals(type)&&rid.startsWith("mac_info_")){
+        req("ssap://com.webos.service.connectionmanager/getStatus",null);
       }else if("error".equals(type)){
         if(rid.startsWith("apps_")){gotApps=true;}
-        else if(rid.startsWith("mac_")) {
-          state("LG conectada. La MAC puede obtenerse desde Ajustes > Soporte > Información de TV.");
+        else if(rid.startsWith("mac_info_")){
+          req("ssap://com.webos.service.connectionmanager/getStatus",null);
+        }else if(rid.startsWith("mac_status_")){
+          macInfo("MAC automática no disponible. Compruébala en el menú de la TV.");
         }
         else state("La TV ha rechazado una orden: "+m.optString("error","sin detalle"));
       }
@@ -304,7 +344,9 @@ public class MainActivity extends Activity {
     try{
       JSONObject m=new JSONObject();
       m.put("type","request");
-      m.put("id",(uri.contains("listLaunchPoints")?"apps_":uri.contains("connectionmanager/getinfo")?"mac_":"req_")+(++requestId));
+      m.put("id",(uri.contains("listLaunchPoints")?"apps_":
+          uri.contains("connectionmanager/getinfo")?"mac_info_":
+          uri.contains("connectionmanager/getStatus")?"mac_status_":"req_")+(++requestId));
       m.put("uri",uri);
       if(payload!=null)m.put("payload",payload);
       control.send(m.toString());
