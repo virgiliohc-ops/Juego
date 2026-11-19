@@ -1,8 +1,8 @@
-name: Compilar mando LG sin conflicto v0.4
+name: Compilar LG botones nativos v0.5
 on:
   push:
     branches:
-      - build/mando-lg-sin-conflicto-v04-20261119
+      - build/mando-lg-botones-nativos-v05-20261119
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,6 +33,6 @@ jobs:
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: MiMandoLG-sin-conflicto-v04-APK
+          name: MiMandoLG-botones-nativos-v05-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
