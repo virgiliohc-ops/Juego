@@ -1,8 +1,0 @@
-<resources>
-    <style name="Theme.Numen" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:statusBarColor">#0E1425</item>
-        <item name="android:navigationBarColor">#10192D</item>
-        <item name="android:windowActionModeOverlay">true</item>
-    </style>
-</resources>
