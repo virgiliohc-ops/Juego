@@ -1,8 +1,8 @@
-name: Compilar LG Wake-On-LAN v0.6
+name: Compilar LG corregido v0.7
 on:
   push:
     branches:
-      - build/mando-lg-wol-v06-20261119
+      - build/mando-lg-wol-fix-v07-20261119
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,7 +25,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - run: gradle --no-daemon :app:assembleDebug
+      - run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
       - name: Verificar APK
         run: |
           test -s app/build/outputs/apk/debug/app-debug.apk
@@ -33,6 +33,6 @@ jobs:
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: MiMandoLG-WOL-v06-APK
+          name: MiMandoLG-WOL-corregido-v07-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
