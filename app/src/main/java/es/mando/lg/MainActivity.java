@@ -1,6 +1,7 @@
 package es.mando.lg;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.os.Bundle;
 import android.content.*;
 import android.graphics.*;
