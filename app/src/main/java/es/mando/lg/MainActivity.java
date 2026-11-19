@@ -14,6 +14,10 @@ import java.security.*;
 import java.security.cert.*;
 import javax.net.ssl.*;
 import java.util.*;
+import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.*;
+import android.net.*;
 import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends Activity {
@@ -28,6 +32,7 @@ public class MainActivity extends Activity {
   private volatile boolean connected=false,pointerReady=false,muted=false;
   private int requestId=0,connectGeneration=0;
   private boolean gotApps=false;
+  private volatile boolean searching=false;
 
   @Override public void onCreate(Bundle b) {
     super.onCreate(b);
@@ -71,10 +76,20 @@ public class MainActivity extends Activity {
     connect.setOnClickListener(v->connect());
     connectBar.addView(connect,new LinearLayout.LayoutParams(dp(106),dp(50)));
     root.addView(connectBar);
+    Button autoFind=new Button(this);
+    autoFind.setText("⌕  Buscar mi LG automáticamente");
+    autoFind.setAllCaps(false);
+    autoFind.setTextSize(16);
+    autoFind.setTextColor(Color.rgb(33,78,63));
+    autoFind.setBackground(background(MINT,15));
+    LinearLayout.LayoutParams autoParams=new LinearLayout.LayoutParams(-1,dp(54));
+    autoParams.setMargins(0,dp(8),0,dp(5));
+    root.addView(autoFind,autoParams);
+    autoFind.setOnClickListener(v->discoverTV());
 
     LinearLayout stateRow=new LinearLayout(this);stateRow.setOrientation(LinearLayout.HORIZONTAL);
     stateRow.setGravity(Gravity.CENTER_VERTICAL);
-    status=new TextView(this);status.setText("Introduce la IP del televisor y conéctate.");
+    status=new TextView(this);status.setText("Pulsa Buscar mi LG. No necesitas conocer su IP.");
     status.setTextColor(Color.rgb(76,95,90));status.setTextSize(12);
     status.setMaxLines(3);
     stateRow.addView(status,new LinearLayout.LayoutParams(0,-2,1));
@@ -89,7 +104,7 @@ public class MainActivity extends Activity {
     root.addView(remote,new LinearLayout.LayoutParams(-1,-2));
 
     TextView foot=new TextView(this);
-    foot.setText("Toca el aro para navegar y el centro para aceptar. La voz y Alexa no están disponibles en este prototipo. Encender la TV apagada todavía no está implementado.");
+    foot.setText("La LG debe estar encendida y conectada a la misma red local que el móvil. Si no aparece en la búsqueda, puedes introducir su IP manualmente. Voz y Alexa no disponibles; encendido desde apagado aún no implementado.");
     foot.setTextSize(12);foot.setTextColor(Color.rgb(100,108,104));
     foot.setPadding(dp(8),dp(10),dp(8),dp(12));root.addView(foot);
   }
@@ -276,6 +291,116 @@ public class MainActivity extends Activity {
     if(target==null){toast("No se encontró esa aplicación en la televisión.");return;}
     try{JSONObject p=new JSONObject();p.put("id",target);req("ssap://system.launcher/launch",p);}
     catch(Exception e){state("No se pudo abrir la aplicación.");}
+  }
+
+
+  private void discoverTV(){
+    if(searching){toast("La búsqueda ya está en curso.");return;}
+    searching=true;
+    state("Buscando televisores LG en tu Wi-Fi…");
+    new Thread(()->{
+      LinkedHashSet<String> candidates=new LinkedHashSet<>();
+      try{
+        DatagramSocket socket=new DatagramSocket();
+        try{
+          socket.setSoTimeout(250);
+          String[] targets={
+            "urn:lge-com:service:webos-second-screen:1",
+            "urn:schemas-upnp-org:device:MediaRenderer:1"
+          };
+          for(String target:targets){
+            String request="M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: "+target+"\r\n\r\n";
+            byte[] data=request.getBytes(StandardCharsets.UTF_8);
+            DatagramPacket out=new DatagramPacket(data,data.length,InetAddress.getByName("239.255.255.250"),1900);
+            socket.send(out);
+            socket.send(out);
+          }
+          long deadline=System.currentTimeMillis()+3300;
+          while(System.currentTimeMillis()<deadline){
+            try{
+              byte[] buf=new byte[8192];
+              DatagramPacket response=new DatagramPacket(buf,buf.length);
+              socket.receive(response);
+              String headers=new String(response.getData(),0,response.getLength(),StandardCharsets.UTF_8).toLowerCase(Locale.ROOT);
+              String address=response.getAddress().getHostAddress();
+              if(localAddress(address) &&
+                (headers.contains("lge")||headers.contains("webos")||headers.contains("lg smart tv")))
+                candidates.add(address);
+            }catch(SocketTimeoutException timeout){}
+          }
+        }finally{socket.close();}
+      }catch(Exception e){}
+      if(candidates.isEmpty()){
+        runOnUiThread(()->state("No respondió por búsqueda directa; comprobando los televisores de la red…"));
+        String prefix=wifiIPv4Prefix();
+        if(prefix!=null){
+          Set<String> scanned=Collections.synchronizedSet(new HashSet<>());
+          ExecutorService pool=Executors.newFixedThreadPool(24);
+          for(int n=1;n<=254;n++){
+            final String candidate=prefix+n;
+            pool.execute(()->{
+              for(int port:new int[]{3001,3000}){
+                try(Socket test=new Socket()){
+                  test.connect(new InetSocketAddress(candidate,port),450);
+                  scanned.add(candidate);return;
+                }catch(Exception e){}
+              }
+            });
+          }
+          pool.shutdown();
+          try{pool.awaitTermination(12,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}
+          candidates.addAll(scanned);
+        }
+      }
+      ArrayList<String> found=new ArrayList<>(candidates);
+      Collections.sort(found);
+      searching=false;
+      runOnUiThread(()->{
+        if(isFinishing()||isDestroyed())return;
+        if(found.isEmpty()){
+          state("No encontré tu LG. Comprueba que esté encendida y en el mismo Wi-Fi.");
+          new AlertDialog.Builder(this)
+            .setTitle("No se encontró ninguna LG")
+            .setMessage("Enciende el televisor y conecta el móvil a la misma red local. Evita redes de invitados o VPN. También puedes introducir la IP manualmente.")
+            .setPositiveButton("Entendido",null).show();
+        }else if(found.size()==1){
+          ipField.setText(found.get(0));
+          state("Televisor encontrado: "+found.get(0)+". Solicitando autorización…");
+          connect();
+        }else{
+          String[] choices=found.toArray(new String[0]);
+          state("Encontré "+found.size()+" dispositivos compatibles. Selecciona tu LG.");
+          new AlertDialog.Builder(this)
+            .setTitle("Elige tu televisor LG")
+            .setItems(choices,(dialog,which)->{
+              ipField.setText(choices[which]);
+              connect();
+            })
+            .setNegativeButton("Cancelar",null).show();
+        }
+      });
+    },"lg-wifi-discovery").start();
+  }
+
+  private String wifiIPv4Prefix(){
+    try{
+      ConnectivityManager manager=(ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
+      if(manager==null)return null;
+      for(Network network:manager.getAllNetworks()){
+        NetworkCapabilities caps=manager.getNetworkCapabilities(network);
+        if(caps==null||!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))continue;
+        LinkProperties props=manager.getLinkProperties(network);
+        if(props==null)continue;
+        for(LinkAddress a:props.getLinkAddresses()){
+          InetAddress address=a.getAddress();
+          if(address instanceof Inet4Address&&localAddress(address.getHostAddress())){
+            String[] pieces=address.getHostAddress().split("\\.");
+            return pieces[0]+"."+pieces[1]+"."+pieces[2]+".";
+          }
+        }
+      }
+    }catch(Exception e){}
+    return null;
   }
 
   private void forgetPairing(){
