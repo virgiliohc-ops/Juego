@@ -1,8 +1,8 @@
-name: Compilar LG botones nativos v0.5
+name: Compilar LG Wake-On-LAN v0.6
 on:
   push:
     branches:
-      - build/mando-lg-botones-nativos-v05-20261119
+      - build/mando-lg-wol-v06-20261119
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,6 +33,6 @@ jobs:
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: MiMandoLG-botones-nativos-v05-APK
+          name: MiMandoLG-WOL-v06-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
