@@ -382,116 +382,119 @@ public class MainActivity extends Activity {
   }
 
 
+
   private void discoverTV(){
     if(searching){toast("La búsqueda ya está en curso.");return;}
     searching=true;
-    state("Buscando televisores LG en tu Wi-Fi…");
+    state("Buscando tu LG en la red Wi-Fi local…");
     new Thread(()->{
-      LinkedHashSet<String> candidates=new LinkedHashSet<>();
-      try{
-        DatagramSocket socket=new DatagramSocket();
+      final WifiRoute wifi=wifiRoute();
+      LinkedHashSet<String> found=new LinkedHashSet<>();
+      if(wifi==null){
+        searching=false;
+        state("Wi-Fi no disponible. Conecta el móvil a la red de la televisión.");
+        diagnostic("No se detectó una interfaz Wi-Fi IPv4 en Android.");
+        return;
+      }
+      String saved=ipField.getText().toString().trim();
+      if(localAddress(saved)&&isControlReachable(wifi.network,saved))found.add(saved);
+      WifiManager.MulticastLock lock=null;
+      if(found.isEmpty()){
         try{
-          socket.setSoTimeout(250);
-          String[] targets={
-            "urn:lge-com:service:webos-second-screen:1",
-            "urn:schemas-upnp-org:device:MediaRenderer:1"
-          };
-          for(String target:targets){
-            String request="M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: "+target+"\r\n\r\n";
-            byte[] data=request.getBytes(StandardCharsets.UTF_8);
-            DatagramPacket out=new DatagramPacket(data,data.length,InetAddress.getByName("239.255.255.250"),1900);
-            socket.send(out);
-            socket.send(out);
+          WifiManager wm=(WifiManager)getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+          if(wm!=null){
+            lock=wm.createMulticastLock("lg-magic-remote-discovery");
+            lock.setReferenceCounted(false);lock.acquire();
           }
-          long deadline=System.currentTimeMillis()+3300;
-          while(System.currentTimeMillis()<deadline){
-            try{
-              byte[] buf=new byte[8192];
-              DatagramPacket response=new DatagramPacket(buf,buf.length);
-              socket.receive(response);
-              String headers=new String(response.getData(),0,response.getLength(),StandardCharsets.UTF_8).toLowerCase(Locale.ROOT);
-              String address=response.getAddress().getHostAddress();
-              if(localAddress(address) &&
-                (headers.contains("lge")||headers.contains("webos")||headers.contains("lg smart tv")))
-                candidates.add(address);
-            }catch(SocketTimeoutException timeout){}
-          }
-        }finally{socket.close();}
-      }catch(Exception e){}
-      if(candidates.isEmpty()){
-        runOnUiThread(()->state("No respondió por búsqueda directa; comprobando los televisores de la red…"));
-        String prefix=wifiIPv4Prefix();
-        if(prefix!=null){
-          Set<String> scanned=Collections.synchronizedSet(new HashSet<>());
+        }catch(Exception e){diagnostic("Multicast: "+e.getClass().getSimpleName());}
+        try{
+          DatagramSocket socket=new DatagramSocket();
+          try{
+            wifi.network.bindSocket(socket);
+            socket.setSoTimeout(300);
+            String[] targets={
+              "urn:lge-com:service:webos-second-screen:1",
+              "urn:schemas-upnp-org:device:MediaRenderer:1",
+              "ssdp:all"
+            };
+            for(String target:targets){
+              String request="M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n"+
+                "MAN: \"ssdp:discover\"\r\nMX: 2\r\nST: "+target+"\r\n\r\n";
+              byte[] data=request.getBytes(StandardCharsets.UTF_8);
+              DatagramPacket message=new DatagramPacket(data,data.length,
+                InetAddress.getByName("239.255.255.250"),1900);
+              socket.send(message);
+            }
+            long deadline=System.currentTimeMillis()+3200;
+            while(System.currentTimeMillis()<deadline){
+              try{
+                byte[] buf=new byte[8192];
+                DatagramPacket reply=new DatagramPacket(buf,buf.length);
+                socket.receive(reply);
+                String text=new String(reply.getData(),0,reply.getLength(),StandardCharsets.UTF_8)
+                  .toLowerCase(Locale.ROOT);
+                String host=reply.getAddress().getHostAddress();
+                if(localAddress(host)&&(text.contains("webos")||text.contains("lge")||
+                  text.contains("lg smart tv")))found.add(host);
+              }catch(SocketTimeoutException ignored){}
+            }
+          }finally{socket.close();}
+        }catch(Exception ex){diagnostic("SSDP no disponible: "+ex.getClass().getSimpleName());}
+        finally{if(lock!=null&&lock.isHeld())lock.release();}
+      }
+      if(found.isEmpty()){
+        state("SSDP sin respuesta. Comprobando el segmento Wi-Fi…");
+        // Scan a maximum /23 network, no arbitrary /24 assumption or huge /16 sweep.
+        if(wifi.prefix>=23&&wifi.prefix<=30){
+          byte[] octets=wifi.address.getAddress();
+          long ipValue=0;
+          for(byte b:octets)ipValue=(ipValue<<8)|(b&255L);
+          long mask=(0xffffffffL<<(32-wifi.prefix))&0xffffffffL;
+          long first=ipValue&mask,last=first|(~mask&0xffffffffL);
+          Set<String> discovered=Collections.synchronizedSet(new LinkedHashSet<>());
           ExecutorService pool=Executors.newFixedThreadPool(24);
-          for(int n=1;n<=254;n++){
-            final String candidate=prefix+n;
-            pool.execute(()->{
-              for(int port:new int[]{3001,3000}){
-                try(Socket test=new Socket()){
-                  test.connect(new InetSocketAddress(candidate,port),450);
-                  scanned.add(candidate);return;
-                }catch(Exception e){}
-              }
-            });
+          for(long number=first+1;number<last;number++){
+            String candidate=((number>>>24)&255)+"."+((number>>>16)&255)+"."+
+              ((number>>>8)&255)+"."+(number&255);
+            if(!localAddress(candidate)||candidate.equals(wifi.address.getHostAddress()))continue;
+            pool.execute(()->{if(isControlReachable(wifi.network,candidate))discovered.add(candidate);});
           }
           pool.shutdown();
-          try{pool.awaitTermination(12,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}
-          candidates.addAll(scanned);
+          try{pool.awaitTermination(16,TimeUnit.SECONDS);}
+          catch(InterruptedException ex){Thread.currentThread().interrupt();}
+          found.addAll(discovered);
         }
       }
-      ArrayList<String> found=new ArrayList<>(candidates);
-      Collections.sort(found);
+      ArrayList<String> results=new ArrayList<>(found);
+      Collections.sort(results);
       searching=false;
       runOnUiThread(()->{
         if(isFinishing()||isDestroyed())return;
-        if(found.isEmpty()){
-          state("No encontré tu LG. Comprueba que esté encendida y en el mismo Wi-Fi.");
+        if(results.isEmpty()){
+          state("No veo tu LG encendida en esta red.");
+          diagnostic("Wi-Fi "+wifi.address.getHostAddress()+"/"+wifi.prefix+
+            " · difusión "+wifi.broadcast+
+            ". Si la LG está apagada, usa Encender, no Buscar.");
           new AlertDialog.Builder(this)
-            .setTitle("No se encontró ninguna LG")
-            .setMessage("Enciende el televisor y conecta el móvil a la misma red local. Evita redes de invitados o VPN. También puedes introducir la IP manualmente.")
+            .setTitle("No se encontró la LG")
+            .setMessage("La búsqueda solo funciona con la TV encendida. Si está apagada, usa Encender. Comprueba que el móvil sigue en el mismo Wi-Fi.")
             .setPositiveButton("Entendido",null).show();
-        }else if(found.size()==1){
-          ipField.setText(found.get(0));
-          state("Televisor encontrado: "+found.get(0)+". Solicitando autorización…");
+        }else if(results.size()==1){
+          ipField.setText(results.get(0));
           connect();
         }else{
-          String[] choices=found.toArray(new String[0]);
-          state("Encontré "+found.size()+" dispositivos compatibles. Selecciona tu LG.");
+          String[] choices=results.toArray(new String[0]);
+          state("Selecciona la IP de tu LG. Detectados: "+choices.length);
           new AlertDialog.Builder(this)
-            .setTitle("Elige tu televisor LG")
-            .setItems(choices,(dialog,which)->{
-              ipField.setText(choices[which]);
-              connect();
+            .setTitle("Dispositivos encontrados")
+            .setItems(choices,(dialog,index)->{
+              ipField.setText(choices[index]);connect();
             })
             .setNegativeButton("Cancelar",null).show();
         }
       });
-    },"lg-wifi-discovery").start();
+    },"lg-ssdp-discovery").start();
   }
-
-  private String wifiIPv4Prefix(){
-    try{
-      ConnectivityManager manager=(ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
-      if(manager==null)return null;
-      for(Network network:manager.getAllNetworks()){
-        NetworkCapabilities caps=manager.getNetworkCapabilities(network);
-        if(caps==null||!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))continue;
-        LinkProperties props=manager.getLinkProperties(network);
-        if(props==null)continue;
-        for(LinkAddress a:props.getLinkAddresses()){
-          InetAddress address=a.getAddress();
-          if(address instanceof Inet4Address&&localAddress(address.getHostAddress())){
-            String[] pieces=address.getHostAddress().split("\\.");
-            return pieces[0]+"."+pieces[1]+"."+pieces[2]+".";
-          }
-        }
-      }
-    }catch(Exception e){}
-    return null;
-  }
-
-
 
   private static final class WifiRoute {
     final Network network;
