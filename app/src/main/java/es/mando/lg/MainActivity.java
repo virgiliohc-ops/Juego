@@ -87,7 +87,7 @@ public class MainActivity extends Activity {
     macField.setSingleLine(true);
     macField.setHint("MAC de la LG (detectada al conectar)");
     macField.setTextSize(12);
-    macField.setText(pref.getString("mac:"+ipField.getText().toString().trim(),"14:7F:67:CE:D9:44"));
+    macField.setText(pref.getString("mac:"+ipField.getText().toString().trim(),""));
     macField.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
     macField.setPadding(dp(10),dp(6),dp(8),dp(6));
     macField.setBackground(background(Color.WHITE,12));
@@ -104,7 +104,7 @@ public class MainActivity extends Activity {
     wake.setOnClickListener(v->sendWake());
     root.addView(wakeBar);
     macSummary=new TextView(this);
-    macSummary.setText("MAC de la v0.6 (tipo sin confirmar). Conecta para verificarla.");
+    macSummary.setText("MAC pendiente. Se detectará al conectar la LG encendida.");
     macSummary.setTextColor(Color.rgb(91,101,100));macSummary.setTextSize(11);
     macSummary.setPadding(dp(6),dp(4),dp(6),dp(4));
     root.addView(macSummary);
@@ -179,7 +179,7 @@ public class MainActivity extends Activity {
     if(pointer!=null)pointer.cancel();
     connected=false;pointerReady=false;gotApps=false;appIds.clear();queuedApp=null;
     ip=entered;fingerprint="";
-    if(macField!=null)macField.setText(pref.getString("mac:"+ip,"14:7F:67:CE:D9:44"));
+    if(macField!=null)macField.setText(pref.getString("mac:"+ip,""));
     WifiRoute wifi=wifiRoute();
     if(wifi==null){state("El teléfono no tiene una red Wi-Fi IPv4 activa.");
       diagnostic("Conecta el móvil al Wi-Fi doméstico.");return;}
@@ -563,7 +563,7 @@ public class MainActivity extends Activity {
     final String typed=normalizeMAC(raw);
     if(!raw.trim().isEmpty()&&typed.isEmpty()){
       state("La dirección MAC introducida no es válida.");
-      diagnostic("Usa seis parejas hexadecimales, p. ej. 14:7F:67:CE:D9:44.");
+      diagnostic("Usa seis parejas hexadecimales, p. ej. 02:11:22:33:44:55.");
       return;
     }
     final LinkedHashSet<String> macs=new LinkedHashSet<>();
