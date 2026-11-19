@@ -27,6 +27,7 @@ public class MainActivity extends Activity {
   private SharedPreferences pref;
   private TextView status;
   private EditText ipField;
+  private EditText macField;
   private WebSocket control,pointer;
   private OkHttpClient secure,legacy;
   private String ip="", fingerprint="", queuedApp=null;
@@ -77,6 +78,28 @@ public class MainActivity extends Activity {
     connect.setOnClickListener(v->connect());
     connectBar.addView(connect,new LinearLayout.LayoutParams(dp(106),dp(50)));
     root.addView(connectBar);
+    LinearLayout wakeBar=new LinearLayout(this);
+    wakeBar.setOrientation(LinearLayout.HORIZONTAL);
+    macField=new EditText(this);
+    macField.setSingleLine(true);
+    macField.setHint("MAC de la LG (detectada al conectar)");
+    macField.setTextSize(12);
+    macField.setText(pref.getString("mac:"+ipField.getText().toString().trim(),""));
+    macField.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+    macField.setPadding(dp(10),dp(6),dp(8),dp(6));
+    macField.setBackground(background(Color.WHITE,12));
+    LinearLayout.LayoutParams macParams=new LinearLayout.LayoutParams(0,dp(46),1);
+    macParams.setMargins(0,dp(7),dp(8),dp(2));
+    wakeBar.addView(macField,macParams);
+    Button wake=new Button(this);
+    wake.setText("⏻ Encender");wake.setAllCaps(false);wake.setTextSize(12);
+    wake.setTextColor(Color.WHITE);
+    wake.setBackground(background(Color.rgb(172,60,78),12));
+    LinearLayout.LayoutParams wp=new LinearLayout.LayoutParams(dp(106),dp(46));
+    wp.setMargins(0,dp(7),0,0);
+    wakeBar.addView(wake,wp);
+    wake.setOnClickListener(v->sendWake());
+    root.addView(wakeBar);
     Button autoFind=new Button(this);
     autoFind.setText("⌕  Buscar mi LG automáticamente");
     autoFind.setAllCaps(false);
@@ -108,7 +131,7 @@ public class MainActivity extends Activity {
     root.addView(remote,remoteParams);
 
     TextView foot=new TextView(this);
-    foot.setText("La LG debe estar encendida y conectada a la misma red local que el móvil. Si no aparece en la búsqueda, puedes introducir su IP manualmente. Voz y Alexa no disponibles; encendido desde apagado aún no implementado.");
+    foot.setText("LG 50UT80006LA · Activa en la TV Ajustes > General > Dispositivos externos > Encendido con móvil > Encender mediante Wi-Fi. La MAC se intenta guardar al conectar. Voz/Alexa no disponibles.");
     foot.setTextSize(12);foot.setTextColor(Color.rgb(100,108,104));
     foot.setPadding(dp(8),dp(10),dp(8),dp(12));root.addView(foot);
   }
@@ -138,6 +161,7 @@ public class MainActivity extends Activity {
     if(pointer!=null)pointer.cancel();
     connected=false;pointerReady=false;gotApps=false;appIds.clear();queuedApp=null;
     ip=entered;fingerprint="";
+    if(macField!=null)macField.setText(pref.getString("mac:"+ip,""));
     pref.edit().putString("ip",ip).apply();
     try{
       final X509TrustManager trust=new X509TrustManager(){
@@ -224,6 +248,21 @@ public class MainActivity extends Activity {
         state("LG conectada. Ya puedes utilizar el mando.");
         req("ssap://com.webos.service.networkinput/getPointerInputSocket",null);
         req("ssap://com.webos.applicationManager/listLaunchPoints",null);
+        req("ssap://com.webos.service.connectionmanager/getinfo",null);
+      }else if(p!=null&&(p.has("wifiInfo")||p.has("wiredInfo"))){
+        String wifiMac=readMAC(p.optJSONObject("wifiInfo"));
+        String wiredMac=readMAC(p.optJSONObject("wiredInfo"));
+        if(!wifiMac.isEmpty()||!wiredMac.isEmpty()){
+          SharedPreferences.Editor ed=pref.edit();
+          if(!wifiMac.isEmpty())ed.putString("wifi_mac:"+ip,wifiMac);
+          if(!wiredMac.isEmpty())ed.putString("wired_mac:"+ip,wiredMac);
+          String candidate=!wifiMac.isEmpty()?wifiMac:wiredMac;
+          ed.putString("mac:"+ip,candidate).apply();
+          runOnUiThread(()->{
+            if(macField!=null)macField.setText(candidate);
+            state("LG conectada · Dirección para encendido guardada.");
+          });
+        }
       }else if(p!=null&&p.has("socketPath")){
         String socket=p.optString("socketPath","");
         OkHttpClient client=socket.startsWith("wss://")?secure:legacy;
@@ -252,6 +291,9 @@ public class MainActivity extends Activity {
         }
       }else if("error".equals(type)){
         if(rid.startsWith("apps_")){gotApps=true;}
+        else if(rid.startsWith("mac_")) {
+          state("LG conectada. La MAC puede obtenerse desde Ajustes > Soporte > Información de TV.");
+        }
         else state("La TV ha rechazado una orden: "+m.optString("error","sin detalle"));
       }
     }catch(Exception e){state("Respuesta de la LG no reconocida.");}
@@ -262,7 +304,7 @@ public class MainActivity extends Activity {
     try{
       JSONObject m=new JSONObject();
       m.put("type","request");
-      m.put("id",(uri.contains("listLaunchPoints")?"apps_":"req_")+(++requestId));
+      m.put("id",(uri.contains("listLaunchPoints")?"apps_":uri.contains("connectionmanager/getinfo")?"mac_":"req_")+(++requestId));
       m.put("uri",uri);
       if(payload!=null)m.put("payload",payload);
       control.send(m.toString());
@@ -407,6 +449,70 @@ public class MainActivity extends Activity {
     return null;
   }
 
+
+  private String normalizeMAC(String raw){
+    if(raw==null)return "";
+    String cleaned=raw.trim().replaceAll("[^0-9A-Fa-f]","").toUpperCase(java.util.Locale.US);
+    if(cleaned.length()!=12 || cleaned.equals("000000000000") || cleaned.equals("FFFFFFFFFFFF"))return "";
+    try{
+      int first=Integer.parseInt(cleaned.substring(0,2),16);
+      if((first&1)!=0)return "";
+    }catch(Exception e){return "";}
+    return cleaned.substring(0,2)+":"+cleaned.substring(2,4)+":"+
+      cleaned.substring(4,6)+":"+cleaned.substring(6,8)+":"+
+      cleaned.substring(8,10)+":"+cleaned.substring(10,12);
+  }
+  private String readMAC(JSONObject obj){
+    if(obj==null)return "";
+    return normalizeMAC(obj.optString("macAddress",""));
+  }
+  private void sendWake(){
+    String host=ipField.getText().toString().trim();
+    if(!localAddress(host)){state("Primero selecciona o detecta tu televisor.");return;}
+    String typed=normalizeMAC(macField==null?"":macField.getText().toString());
+    LinkedHashSet<String> macs=new LinkedHashSet<>();
+    if(!typed.isEmpty())macs.add(typed);
+    String wifi=normalizeMAC(pref.getString("wifi_mac:"+host,""));
+    String wired=normalizeMAC(pref.getString("wired_mac:"+host,""));
+    if(!wifi.isEmpty())macs.add(wifi);
+    if(!wired.isEmpty())macs.add(wired);
+    String saved=normalizeMAC(pref.getString("mac:"+host,""));
+    if(!saved.isEmpty())macs.add(saved);
+    if(macs.isEmpty()){
+      state("No tengo la MAC de la LG. Conéctala encendida una vez o escribe su MAC.");
+      toast("Activa 'Encender mediante Wi-Fi' en los ajustes de la TV.");
+      return;
+    }
+    if(!typed.isEmpty())pref.edit().putString("mac:"+host,typed).apply();
+    state("Enviando señal de encendido por Wi-Fi…");
+    new Thread(()->{
+      try{
+        LinkedHashSet<String> dest=new LinkedHashSet<>();
+        dest.add("255.255.255.255");
+        String[] octets=host.split("\\.");
+        if(octets.length==4)dest.add(octets[0]+"."+octets[1]+"."+octets[2]+".255");
+        DatagramSocket socket=new DatagramSocket();
+        try{
+          socket.setBroadcast(true);
+          for(String mac:macs){
+            byte[] hex=new byte[6];String compact=mac.replace(":","");
+            for(int i=0;i<6;i++)hex[i]=(byte)Integer.parseInt(compact.substring(i*2,i*2+2),16);
+            byte[] packet=new byte[6+16*6];java.util.Arrays.fill(packet,0,6,(byte)255);
+            for(int i=6;i<packet.length;i++)packet[i]=hex[(i-6)%6];
+            for(String address:dest) {
+              InetAddress target=InetAddress.getByName(address);
+              for(int port:new int[]{9,7}){
+                DatagramPacket p=new DatagramPacket(packet,packet.length,target,port);
+                for(int repeat=0;repeat<3;repeat++)socket.send(p);
+              }
+            }
+          }
+        }finally{socket.close();}
+        state("Señal enviada. Si la LG no arranca, revisa 'Encender mediante Wi-Fi'.");
+      }catch(Exception ex){state("Error al enviar encendido: "+ex.getClass().getSimpleName());}
+    },"lg-wake-on-lan").start();
+  }
+
   private void forgetPairing(){
     int generation=++connectGeneration;
     if(control!=null)control.cancel();
@@ -421,7 +527,7 @@ public class MainActivity extends Activity {
       case "MIC":case "ALEXA":
         toast("La voz no está disponible en este prototipo.");return;
       case "POWER":
-        if(!connected){toast("La TV debe estar encendida para establecer conexión.");return;}
+        if(!connected){sendWake();return;}
         req("ssap://system/turnOff",null);return;
       case "VOLUP":req("ssap://audio/volumeUp",null);return;
       case "VOLDOWN":req("ssap://audio/volumeDown",null);return;
