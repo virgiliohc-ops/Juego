@@ -19,8 +19,10 @@ jobs:
         with: { gradle-version: '8.9' }
       - name: Instalar Android
         run: |
-          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-          yes | sdkmanager --licenses > /dev/null || true
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -n 1)"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install 'platforms;android-35' 'build-tools;35.0.0'
       - name: Compilar
         working-directory: PatronIA
         run: gradle --no-daemon --stacktrace :app:assembleDebug
