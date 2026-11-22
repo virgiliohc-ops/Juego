@@ -1,16 +1,16 @@
 plugins { id 'com.android.application' }
 android {
-    namespace 'com.numen.origen'
-    compileSdk 35
-    defaultConfig {
-        applicationId 'com.numen.origen'
-        minSdk 24
-        targetSdk 34
-        versionCode 4
-        versionName '0.4'
-    }
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
+ namespace 'com.patronia.taller'
+ compileSdk 35
+ defaultConfig {
+  applicationId 'com.patronia.taller'
+  minSdk 26
+  targetSdk 34
+  versionCode 4
+  versionName '0.4'
+ }
+ compileOptions {
+  sourceCompatibility JavaVersion.VERSION_17
+  targetCompatibility JavaVersion.VERSION_17
+ }
 }

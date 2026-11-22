@@ -1,18 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-  <application
-      android:allowBackup="true"
-      android:usesCleartextTraffic="false"
-      android:label="NÚMEN"
-      android:icon="@mipmap/ic_launcher"
-      android:roundIcon="@mipmap/ic_launcher"
-      android:theme="@style/Theme.Numen"
-      android:supportsRtl="true">
-    <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
-      <intent-filter>
-        <action android:name="android.intent.action.MAIN" />
-        <category android:name="android.intent.category.LAUNCHER" />
-      </intent-filter>
-    </activity>
-  </application>
+ <application android:label="PatronIA" android:icon="@drawable/patronia_icon"
+ android:roundIcon="@drawable/patronia_icon" android:usesCleartextTraffic="false"
+ android:allowBackup="false" android:supportsRtl="true"
+ android:theme="@style/Theme.PatronIA">
+ <activity android:name="com.patronia.taller.MainActivity" android:exported="true"
+ android:windowSoftInputMode="adjustResize">
+  <intent-filter>
+   <action android:name="android.intent.action.MAIN"/>
+   <category android:name="android.intent.category.LAUNCHER"/>
+  </intent-filter>
+ </activity></application>
 </manifest>
