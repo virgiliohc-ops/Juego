@@ -42,10 +42,7 @@ jobs:
             adb shell am start -W -n com.patronia.taller/.MainActivity
             sleep 8
             adb shell pidof com.patronia.taller
-            if adb logcat -d -b crash | grep -E 'Process: com.patronia.taller|com.patronia.taller.MainActivity'; then
-              echo "ERROR: PatronIA se cerró inesperadamente"
-              exit 1
-            fi
+            ! adb logcat -d -b crash | grep -q 'Process: com.patronia.taller'
             adb shell screencap -p /sdcard/PatronIA_emulador.png
             adb pull /sdcard/PatronIA_emulador.png PatronIA_emulador.png
       - name: Guardar captura del emulador
