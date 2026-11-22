@@ -26,6 +26,35 @@ jobs:
           gradle-version: '8.9'
       - name: Compilar paquete Android real
         run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Autorizar uso del emulador Android
+        run: sudo chmod 666 /dev/kvm || true
+      - name: Arranque real en emulador Android 15
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            set -e
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb logcat -c
+            adb shell am start -W -n com.patronia.taller/.MainActivity
+            sleep 8
+            adb shell pidof com.patronia.taller
+            if adb logcat -d -b crash | grep -E 'Process: com.patronia.taller|com.patronia.taller.MainActivity'; then
+              echo "ERROR: PatronIA se cerró inesperadamente"
+              exit 1
+            fi
+            adb shell screencap -p /sdcard/PatronIA_emulador.png
+            adb pull /sdcard/PatronIA_emulador.png PatronIA_emulador.png
+      - name: Guardar captura del emulador
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PatronIA-prueba-arranque
+          path: PatronIA_emulador.png
+          if-no-files-found: ignore
       - name: Validar instalador
         run: |
           set -euo pipefail
